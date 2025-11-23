@@ -4,37 +4,65 @@ import matplotlib.animation as animation
 import heapq
 from matplotlib import colors
 import time
-import math
 import os
+from typing import Iterator, Callable
 
-DIRECTIONS = [(-1,-1),(1,1),(-1,1),(1,-1),(-1,0),(1,0),(0,-1),(0,1)]
-CORNER_CUTTING=False
+Coord = tuple[int, int]
+Frame = tuple[Coord, set[Coord], dict[Coord, int]]
+
+DIRECTIONS = [(-1,-1),(0,-1),(1,-1),
+              (-1, 0),       (1, 0),
+              (-1, 1),(0, 1),(1, 1)]
 
 ##################################################
 # Utilities
 ##################################################
 
-def heuristic(a, b):
+def heuristic(a: Coord, b: Coord) -> float:
+    """
+    Euclidean distance heuristic
+
+    Args:
+        a: coordinates
+        b: coordinates
+
+    Returns:
+        Euclidean distance between the two points
+    """
     return np.sqrt((a[0]-b[0])**2 + (a[1]-b[1])**2)
 
-def path_length(path):
+def path_length(path: list[Coord]) -> float:
+    """
+    Calculate the path length
+
+    Args:
+        path: list of coordinates that make up the path
+
+    Returns:
+        The path length
+    """
     if not path or len(path) < 2:
         return 0.0
     length = 0.0
     for i in range(len(path) - 1):
-        x0, y0 = path[i]
-        x1, y1 = path[i + 1]
-        dx = abs(x1 - x0)
-        dy = abs(y1 - y0)
-        length += math.sqrt(dx**2+dy**2)
+        length += heuristic(path[i], path[i + 1])
     return length
 
-def load_map(path):
+def load_map(path: str) -> np.ndarray:
+    """
+    Load the map file
+
+    Args:
+        path: file path of the map to load
+
+    Returns:
+        Loaded map in a numpy array
+    """
     height = None
     width = None
 
-    # First pass: read metadata and then read the map
     with open(path, "r") as file_handle:
+        # read metadata and then read the map
         for line in file_handle:
             stripped = line.strip().lower()
 
@@ -66,15 +94,15 @@ def load_map(path):
             col_index = 0
             for ch in line:
                 if ch == ".":
-                    grid[row_index, col_index] = 0
+                    grid[row_index, col_index] = 0  # free space
                 elif ch == "S":
-                    grid[row_index, col_index] = 1
+                    grid[row_index, col_index] = 1  # shallow water
                 elif ch == "T":
-                    grid[row_index, col_index] = 2
+                    grid[row_index, col_index] = 2  # tree
                 elif ch == "W":
-                    grid[row_index, col_index] = 3
+                    grid[row_index, col_index] = 3  # water
                 elif ch == "@":
-                    grid[row_index, col_index] = 4
+                    grid[row_index, col_index] = 4  # out of bounds
                 else:
                     raise ValueError(f"Unknown map symbol: {ch}")
                 col_index += 1
@@ -86,7 +114,19 @@ def load_map(path):
 
     return grid
 
-def trim_grid(grid, start, goal, pad=0):
+def trim_grid(grid: np.ndarray, start: Coord, goal: Coord, pad: int=0) -> tuple[np.ndarray, Coord, Coord]:
+    """
+    Trim the grid down to reduce the search space. It is massive otherwise
+
+    Args:
+        grid: the grid to trim
+        start: the start coordinate
+        end: the end coordinate
+        pad: padding to ensure enough of the map is retained for a feasable path
+
+    Returns:
+        tuple containing the trimmed grid and remapped start and goal coords
+    """
     start_c, start_r = start
     goal_c, goal_r = goal
 
@@ -125,7 +165,19 @@ def trim_grid(grid, start, goal, pad=0):
 
     return trimmed, new_start, new_goal
 
-def traversable(grid, x, y):
+def traversable(grid: np.ndarray, x: int, y: int) -> bool:
+    """
+    Checks if it is possible to travel to the given x,y coords.
+    Handles index out of bounds as well
+
+    Args:
+        grid: the grid we are traversing
+        x: x coord
+        y: y coord
+
+    Returns:
+        boolean to indicate if the x,y coords can be traversed
+    """
     out_of_bounds = not (0 <= x < grid.shape[1] and 0 <= y < grid.shape[0])
     if out_of_bounds:
         return False
@@ -136,7 +188,17 @@ def traversable(grid, x, y):
     else:
         return True
     
-def mark_point(display, point, value, size=3):
+def mark_point(display: np.ndarray, point: Coord, value: int, size: int=3) -> None:
+    """
+    Marks a point with an area. Useful for when the start and goal points appear quite small
+    on the animation.
+
+    Args:
+        display: the grid
+        point: the point to mark
+        value: the of the mark
+        size: the size of the area
+    """
     c, r = point
     rows, cols = display.shape
     half = size // 2
@@ -146,8 +208,20 @@ def mark_point(display, point, value, size=3):
     c_max = min(c + half + 1, cols)
     display[r_min:r_max, c_min:c_max] = value
     
-def build_final_display(grid, start, goal, frames):
-    _, explored_set, _, _ = frames[-1]
+def build_final_display(grid: np.ndarray, start: Coord, goal: Coord, frames: list[Frame]) -> np.ndarray:
+    """
+    Set the grid up with the final frame.
+
+    Args:
+        grid: the grid
+        start: start coord
+        end: end coord
+        frames: animation frames
+
+    Returns:
+        the grid with cells set to the final frame state
+    """
+    _, explored_set, _ = frames[-1]
 
     display = grid.copy()
 
@@ -160,7 +234,16 @@ def build_final_display(grid, start, goal, frames):
 
     return display
 
-def save_final(display, path, title, filename):
+def save_final(display: np.ndarray, path: list[Coord], title: str, filename: str) -> None:
+    """
+    Save a plot
+
+    Args:
+        display: the grid
+        path: the discovered path
+        title: figure title
+        filename: plot file name
+    """
     fig, ax = plt.subplots(figsize=(6,6))
     ax.imshow(display, cmap=cmap, norm=norm, origin='upper')
     for i in range(len(path)-1):
@@ -178,7 +261,21 @@ def save_final(display, path, title, filename):
 # Common framework for both A* and JPS
 ##################################################
 
-def generic_search(grid, start, goal, neighbour_function, corner_cutting=False):
+def generic_search(grid: np.ndarray, start: Coord, goal: Coord, 
+                   neighbour_function: Callable[[np.ndarray, Coord, Coord], Iterator[tuple[Coord, float, list[Coord]]]]
+                   ) -> tuple[list[Coord], list[Frame]]:
+    """
+    A* search with a generic neighbour function so it can run both A* and JPS
+
+    Args:
+        grid: the grid to find the path in
+        start: the starting point
+        goal: the goal point
+        neighbour_function: function to generate neighbours
+
+    Returns:
+        a tuple containing the path found and animation frames
+    """
     open_list = []
     heapq.heappush(open_list, (heuristic(start, goal), 0, start, None))
     came_from = {}
@@ -195,7 +292,7 @@ def generic_search(grid, start, goal, neighbour_function, corner_cutting=False):
         closed.add(current)
         came_from[current] = parent
         explored.add(current)
-        frames.append((current, explored.copy(), came_from.copy(), g_score.copy()))
+        frames.append((current, explored.copy(), g_score.copy()))  # Animation purposes only
 
         # Reconstruct path
         if current == goal:
@@ -205,7 +302,8 @@ def generic_search(grid, start, goal, neighbour_function, corner_cutting=False):
                 current = came_from[current]
             return path[::-1], frames
 
-        for neighbour, cost, intermediate_nodes in neighbour_function(grid, current, goal, corner_cutting=corner_cutting):
+        # Expand neighbours
+        for neighbour, cost, intermediate_nodes in neighbour_function(grid, current, goal):
             if neighbour in closed:
                 continue
             tentative_g = g + cost
@@ -221,18 +319,43 @@ def generic_search(grid, start, goal, neighbour_function, corner_cutting=False):
 # Neighbour expansion for each variant
 ##################################################
 
-def a_star_neighbours(grid, current, goal, corner_cutting=False):
+def a_star_neighbours(grid: np.ndarray, current: Coord, goal: Coord) -> Iterator[tuple[Coord, float, list[Coord]]]:
+    """
+    Get the neighbours using the A* method. All traversable neighbouring points
+
+    Args:
+        grid: the grid we are exploring
+        current: the current point
+        goal: the goal point (unused)
+
+    Returns:
+        the neighbouring points to explore along with their heuristic
+    """
     for dx, dy in DIRECTIONS:
         nx, ny = current[0] + dx, current[1] + dy
         if not traversable(grid, nx, ny):
             continue
-        if not corner_cutting:
-            # Check corner cutting
-            if not traversable(grid, nx - dx, ny) or not traversable(grid, nx, ny - dy):
-                continue
+        
+        # Check corner cutting
+        if not traversable(grid, nx - dx, ny) or not traversable(grid, nx, ny - dy):
+            continue
+
         yield (nx, ny), heuristic(current, (nx,ny)), []
 
-def jump(grid, current, dx, dy, goal, corner_cutting=False):
+def jump(grid: np.ndarray, current: Coord, dx: int, dy: int, goal: Coord) -> tuple[Coord, list[Coord]] | tuple[None, list[Coord]]:
+    """
+    Find jump points in the given direction
+
+    Args:
+        grid: the grid we are exploring
+        current: the current point
+        dx: x direction
+        dy: y direction
+        goal: the goal point
+
+    Returns:
+        Jump point coordinates and intermetdiate nodes explored
+    """
     x, y = current
     intermediate_nodes = [] # Hold intermediate nodes so we do not explore the same nodes more than once (will be added to closed set)
 
@@ -249,84 +372,52 @@ def jump(grid, current, dx, dy, goal, corner_cutting=False):
         
         intermediate_nodes.append((x, y))
 
-        # Main difference between cutting corners and not is where we evaluate a jump point.
-        # If we cannot cut corners, we need the jump point to be beyond the obstacle to get around it.
-        # If we can, then it is sufficent to put the jump point adjacent to the obstacle.
-
         if abs(dx) != abs(dy) and not traversable(grid, x + dx, y + dy):
             return None, intermediate_nodes
         
-        if corner_cutting:
-            # For horizontal and vertical:
-            #   Check if the diagonals are free,
-            #   if they are, then check one space backwards for an obstacle.
-            #   If there is an obsticle, that space is a forced neighbour, so mark the current point as a jump point
-            
-            # Horizontal
-            if dx != 0 and dy == 0:
-                down_diag_free = traversable(grid, x + dx, y + 1)
-                up_diag_free = traversable(grid, x + dx, y - 1)
-                down_adjacent_blocked = not traversable(grid, x, y + 1)
-                up_adjacent_blocked = not traversable(grid, x, y - 1)
-                if (down_diag_free and down_adjacent_blocked) or (up_diag_free and up_adjacent_blocked):
-                    return (x, y), intermediate_nodes
-            # Vertical
-            elif dx == 0 and dy != 0:
-                right_diag_free = traversable(grid, x + 1, y + dy)
-                left_diag_free = traversable(grid, x-1, y + dy)
-                right_adjacent_blocked = not traversable(grid, x + 1, y)
-                left_adjacent_blocked = not traversable(grid, x - 1, y)
-                if (right_diag_free and right_adjacent_blocked) or (left_diag_free and left_adjacent_blocked):
-                    return (x, y), intermediate_nodes
-            # Diagonal
-            else:
-                diag_one_free = traversable(grid, x + dx, y + (-1*dy))
-                adjacent_one_blocked = not traversable(grid, x, y + (-1*dy))
-                diag_two_free = traversable(grid, x + (-1*dx), y + dy)
-                adjacent_two_blocked = not traversable(grid, x + (-1*dx), y)
-                if (diag_one_free and adjacent_one_blocked) or (diag_two_free and adjacent_two_blocked):
-                    return (x,y), intermediate_nodes
-                # Check horizontally and vertically in the direction of motion, ensuring we start from the current node
-                # I.e., offset the +=dx and +=dy that will be done
-                h_jump, h_nodes = jump(grid, (x, y), dx, 0, goal, corner_cutting)
-                v_jump, v_nodes = jump(grid, (x, y), 0, dy, goal, corner_cutting)
-                if h_jump or v_jump:
-                    intermediate_nodes.extend(h_nodes[:-1])
-                    intermediate_nodes.extend(v_nodes[:-1])
-                    return (x, y), intermediate_nodes
+        # Horizontal
+        if dx != 0 and dy == 0:
+            behind_below_diag_blocked = not traversable(grid, x - dx, y + 1)
+            below_free = traversable(grid, x, y + 1)
+            behind_above_diag_blocked = not traversable(grid, x - dx, y - 1)
+            above_free = traversable(grid, x, y - 1)
+            if (behind_above_diag_blocked and above_free) or (behind_below_diag_blocked and below_free):
+                return (x, y), intermediate_nodes
+        # Vertical
+        elif dx == 0 and dy != 0:
+            behind_right_diag_blocked = not traversable(grid, x + 1, y - dy)
+            right_free = traversable(grid, x + 1, y)
+            behind_left_diag_blocked = not traversable(grid, x - 1, y - dy)
+            left_free = traversable(grid, x - 1, y)
+            if (behind_right_diag_blocked and right_free) or (behind_left_diag_blocked and left_free):
+                return (x, y), intermediate_nodes
+        # Diagonal
         else:
-            # Horizontal
-            if dx != 0 and dy == 0:
-                behind_below_diag_blocked = not traversable(grid, x - dx, y + 1)
-                below_free = traversable(grid, x, y + 1)
-                behind_above_diag_blocked = not traversable(grid, x - dx, y - 1)
-                above_free = traversable(grid, x, y - 1)
-                if (behind_above_diag_blocked and above_free) or (behind_below_diag_blocked and below_free):
-                    return (x, y), intermediate_nodes
-            # Vertical
-            elif dx == 0 and dy != 0:
-                behind_right_diag_blocked = not traversable(grid, x + 1, y - dy)
-                right_free = traversable(grid, x + 1, y)
-                behind_left_diag_blocked = not traversable(grid, x - 1, y - dy)
-                left_free = traversable(grid, x - 1, y)
-                if (behind_right_diag_blocked and right_free) or (behind_left_diag_blocked and left_free):
-                    return (x, y), intermediate_nodes
-            # Diagonal
-            else:
-                # Check corner cutting
-                if not traversable(grid, x - dx, y) or not traversable(grid, x, y - dy):
-                    return None, intermediate_nodes
-                
-                h_jump, h_nodes = jump(grid, (x, y), dx, 0, goal, corner_cutting)
-                v_jump, v_nodes = jump(grid, (x, y), 0, dy, goal, corner_cutting)
-                if h_jump or v_jump:
-                    intermediate_nodes.extend(h_nodes[:-1])
-                    intermediate_nodes.extend(v_nodes[:-1])
-                    return (x, y), intermediate_nodes
+            # Check corner cutting
+            if not traversable(grid, x - dx, y) or not traversable(grid, x, y - dy):
+                return None, intermediate_nodes
+            
+            h_jump, h_nodes = jump(grid, (x, y), dx, 0, goal)
+            v_jump, v_nodes = jump(grid, (x, y), 0, dy, goal)
+            if h_jump or v_jump:
+                intermediate_nodes.extend(h_nodes[:-1])
+                intermediate_nodes.extend(v_nodes[:-1])
+                return (x, y), intermediate_nodes
 
-def jps_neighbours(grid, current, goal, corner_cutting=False):
+def jps_neighbours(grid: np.ndarray, current: Coord, goal: Coord) -> Iterator[tuple[Coord, float, list[Coord]]]:
+    """
+    Get the jump point successors (neighbours) of the current point.
+
+    Args:
+        grid: the grid we are exploring
+        current: the current point
+        goal: the goal point
+
+    Returns:
+        the jump points along with their heuristic
+    """
     for dx, dy in DIRECTIONS:
-        next_cell, intermediate_nodes = jump(grid, current, dx, dy, goal, corner_cutting=corner_cutting)
+        next_cell, intermediate_nodes = jump(grid, current, dx, dy, goal)
         if next_cell:
             yield next_cell, heuristic(current, next_cell), intermediate_nodes 
 
@@ -334,11 +425,11 @@ def jps_neighbours(grid, current, goal, corner_cutting=False):
 # Wrappers to call each algorithm
 ##################################################
 
-def a_star_explore(grid, start, goal, corner_cutting=False):
-    return generic_search(grid, start, goal, a_star_neighbours, corner_cutting=corner_cutting)
+def a_star_explore(grid, start, goal):
+    return generic_search(grid, start, goal, a_star_neighbours)
 
-def jps_explore(grid, start, goal, corner_cutting=False):
-    return generic_search(grid, start, goal, jps_neighbours, corner_cutting=corner_cutting)
+def jps_explore(grid, start, goal):
+    return generic_search(grid, start, goal, jps_neighbours)
 
 ##################################################
 # Main script execution
@@ -346,19 +437,20 @@ def jps_explore(grid, start, goal, corner_cutting=False):
 
 if __name__ == "__main__":
     grid = load_map("CatwalkAlley.map")
+    grid = grid.astype(np.int8) # Save on some memory
     start = (278,90)
     goal = (86,130)
     padding = min(max(abs(start[0]) - abs(goal[0]), abs(start[1]) - abs(goal[1])), 20)
     grid, start, goal = trim_grid(grid, start, goal, pad=padding)
 
     t0 = time.time()
-    path_jps, frames_jps = jps_explore(grid, start, goal, corner_cutting=CORNER_CUTTING)
+    path_jps, frames_jps = jps_explore(grid, start, goal)
     t1 = time.time()
     jps_time = t1-t0
     print(f"JPS Took {jps_time:.5f}s")
 
     t0 = time.time()
-    path_astar, frames_astar = a_star_explore(grid, start, goal, corner_cutting=CORNER_CUTTING)
+    path_astar, frames_astar = a_star_explore(grid, start, goal)
     t1 = time.time()
     astar_time = t1-t0
     print(f"A* Took {astar_time:.5f}s")
@@ -396,15 +488,18 @@ if __name__ == "__main__":
     ax2.set_yticks([])
     ax2.set_xticklabels([])
     ax2.set_yticklabels([])
+    
+    x_jps, y_jps = start
+    x_astar, y_astar = start
 
-    def update(frame_index):
+    def update(frame_index: int):
+        global x_jps, y_jps, x_astar, y_astar # Keep in scope
         # JPS frame
         if frame_index < len(frames_jps):
-            current, explored_set_jps, _, _ = frames_jps[frame_index]
-            display_jps = grid.copy()
-            for x, y in explored_set_jps:
-                if display_jps[y, x] == 0:
-                    display_jps[y, x] = 8
+            current, _, _, _ = frames_jps[frame_index]
+            display_jps[y_jps, x_jps] = 8 # Using previous x, y values set to explored
+            x_jps, y_jps = current
+            display_jps[y_jps, x_jps] = 7 # New explored point
             if path_jps and frame_index == len(frames_jps) - 1:
                 for i in range(len(path_jps)-1):
                     x1, y1 = path_jps[i]
@@ -412,17 +507,15 @@ if __name__ == "__main__":
                     ax1.plot([x1, x2],[y1, y2], color="orange", linewidth=1)
             mark_point(display_jps, start, 5, size=3)
             mark_point(display_jps, goal, 6, size=3)
-            display_jps[current[1], current[0]] = 7
             im_jps.set_data(display_jps)
-            ax1.set_title(f"JPS Exploration: {len(explored_set_jps)} nodes")
+            ax1.set_title(f"JPS Exploration: {frame_index + 1} nodes")
 
         # A* frame
         if frame_index < len(frames_astar):
-            current, explored_set_astar, _, _ = frames_astar[frame_index]
-            display_astar = grid.copy()
-            for x, y in explored_set_astar:
-                if display_astar[y, x] == 0:
-                    display_astar[y, x] = 8
+            current, _, _, _ = frames_astar[frame_index]
+            display_astar[y_astar, x_astar] = 8 # Using previous x, y values set to explored
+            x_astar, y_astar = current
+            display_astar[y_astar, x_astar] = 7 # New explored point
             if path_astar and frame_index == len(frames_astar) - 1:
                 for i in range(len(path_astar)-1):
                     x1, y1 = path_astar[i]
@@ -430,14 +523,13 @@ if __name__ == "__main__":
                     ax2.plot([x1, x2],[y1, y2], color="orange", linewidth=1)
             mark_point(display_astar, start, 5, size=3)
             mark_point(display_astar, goal, 6, size=3)
-            display_astar[current[1], current[0]] = 7
             im_astar.set_data(display_astar)
-            ax2.set_title(f"A* Exploration: {len(explored_set_astar)} nodes")
+            ax2.set_title(f"A* Exploration: {frame_index + 1} nodes")
 
         return [im_jps, im_astar]
 
     max_frames = max(len(frames_jps), len(frames_astar))
-    ani = animation.FuncAnimation(fig, update, frames=max_frames, interval=40, blit=False, repeat=False)
+    ani = animation.FuncAnimation(fig, update, frames=max_frames, interval=1000*(1/60), blit=False, repeat=False)
     plt.show()
 
     final_jps = build_final_display(grid, start, goal, frames_jps)
