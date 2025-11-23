@@ -496,7 +496,7 @@ if __name__ == "__main__":
         global x_jps, y_jps, x_astar, y_astar # Keep in scope
         # JPS frame
         if frame_index < len(frames_jps):
-            current, _, _, _ = frames_jps[frame_index]
+            current, _, _ = frames_jps[frame_index]
             display_jps[y_jps, x_jps] = 8 # Using previous x, y values set to explored
             x_jps, y_jps = current
             display_jps[y_jps, x_jps] = 7 # New explored point
@@ -512,7 +512,7 @@ if __name__ == "__main__":
 
         # A* frame
         if frame_index < len(frames_astar):
-            current, _, _, _ = frames_astar[frame_index]
+            current, _, _ = frames_astar[frame_index]
             display_astar[y_astar, x_astar] = 8 # Using previous x, y values set to explored
             x_astar, y_astar = current
             display_astar[y_astar, x_astar] = 7 # New explored point
